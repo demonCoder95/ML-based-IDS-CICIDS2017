@@ -1,0 +1,7 @@
+{
+    "python.linting.enabled": true,
+    "python.autoComplete.addBrackets": true,
+    "python.linting.lintOnSave": true,
+    "python.linting.pylintEnabled": true,
+    "python.pythonPath": "/usr/bin/python3"
+}
