@@ -6,14 +6,28 @@ def do_nothing():
 
 root = tk.Tk()
 root.title("IDS v1.0")
+root.geometry("1024x768")
 
 def exit_routine():
-    # tk.messagebox.showinfo("Scan Info", "The scan is complete!")
     response = tkinter.messagebox.askquestion("Exit", "Are you sure you want to quit?")
     if response == "yes":
         root.quit()
 
+scan_window = None
 
+def render_scan_window():
+    status_bar_scan = tk.Label(scan_window, text="Scanning...", bd=1, relief="sunken", anchor="w")
+    status_bar_scan.pack(side="bottom", fill="x")
+
+def scan_routine():
+    response = tkinter.messagebox.askquestion("Start Scan", "Are you sure you want to start the scan?")
+    if response == "yes":
+        scan_window = tk.Tk()
+        scan_window.title("Scanning...")
+        scan_window.geometry("800x600")
+        render_scan_window()
+
+# ------------ menu bar ----------------
 # create a menu object - serves as the main menu_bar object, a container
 menu_bar = tk.Menu(root)
 # configure the menu in the root window
@@ -43,10 +57,12 @@ print_button.pack(side="left", padx=4, pady=2)
 
 toolbar.pack(side="top", fill="x")
 
-# ------------ status bar --------------
-status_bar = tk.Label(root, text="Program running...", bd=1, relief="sunken", anchor="w")
-status_bar.pack(side="bottom", fill="x")
+# ------------ status bar - main window --------------
+status_bar_main = tk.Label(root, text="Program running...", bd=1, relief="sunken", anchor="w")
+status_bar_main.pack(side="bottom", fill="x")
 
+scan_button = tk.Button(root, text="Start Scan", bg="gray", fg="black", command=scan_routine)
+scan_button.pack(side="bottom", anchor="e", padx=20, pady=20)
 
 
 root.mainloop()
