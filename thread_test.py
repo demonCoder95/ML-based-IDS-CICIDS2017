@@ -1,6 +1,72 @@
 import threading
 import time
+import queue
+import numpy as np
 
+
+
+# class MyThread (threading.Thread):
+#     def __init__(self, threadID, name, *args, **kwargs):
+#         # invoke the parent class instructor
+#         super(MyThread, self).__init__(*args, **kwargs)
+#         # set some instance varaibles
+#         self.threadID = threadID
+#         self.name = name
+
+#     def run(self, *args, **kwargs):
+#         # print some debug message
+#         print("[DEBUG] Starting " + self.name)
+#         # call thread class's run method
+#         super(MyThread, self).run(*args, **kwargs)    
+
+#         # for now, simply run the front-end renderer in the thread
+
+#         # # acquire the thread lock in case of sharing variables
+#         # threadLock.acquire()
+#         # threadLock.release()
+
+# threadLock = threading.Lock()
+
+
+# def flag():
+#     time.sleep(3)
+#     event.set()
+#     print("Starting countdown")
+#     time.sleep(7)
+#     print("event is clear")
+#     event.clear()
+
+
+# def start_operations():
+#     print("waiting for event to happen")
+#     event.wait()
+#     while event.is_set():
+#         print("starting random integer task")
+#         x = np.random.randint(1, 30)
+#         time.sleep(.5)
+#         if x == 29:
+#             print("True")
+
+#     print("Event flag is cleared.")
+
+# event = threading.Event()
+# t1 = threading.Thread(target=flag)
+# t2 = threading.Thread(target=start_operations)
+
+# t1.start()
+# t2.start()
+
+
+
+
+# event = threading.Event()
+
+# # a flag to signal the other thread of an event
+# event.set()
+# event.clear()
+
+# # block the thread until the other thread responds
+# event.wait()
 
 
 # def sleeper(n, name):
