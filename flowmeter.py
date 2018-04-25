@@ -30,17 +30,20 @@ class FlowMeter():
         else:
             return False, False
 
-    def __init__(self, q, scan_event, gui_event):
+    def __init__(self, gui_queue, scan_event, gui_event, log_queue, run_log_event):
         # clear screen to begin
         os.system("clear")
 
         # queue for thread synchronization
-        self.q = q
+        self.gui_queue = gui_queue
+        # queue to sync with log_getter thread
+        self.log_queue = log_queue
         # event object for signalling start and stop of scan
         self.scan_event = scan_event
-
         # event object for signalling the GUI to refresh itself
         self.gui_event = gui_event
+        # event object for signalling log buffer to append given data
+        self.run_log_event = run_log_event
 
         # create sniffer socket and set it to recieve packets
         self.sniffer_socket = socket.socket(socket.PF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
@@ -98,7 +101,6 @@ class FlowMeter():
 
                 # since max PDU size for ethernet is 1522 bytes, 2048 is a safe value to read from socket
                 self.recv_data = self.sniffer_socket.recv(2048)
-                
                 # process the ethernet header and extract ethernet payload
                 self.eth_payload, self.is_ip = sniffer.check_eth_data(self.recv_data)
 
@@ -192,8 +194,11 @@ class FlowMeter():
                             # put the flows that are finished into the queue and send to GUI
                             # as well as to send to the neural network for predictions
                             if self.scan_event.is_set():
-                                self.q.put((self.current_flow.get_flow_id(), self.flow_buffer[self.bwd_id].duration))
+                                self.gui_queue.put((self.current_flow.get_flow_id(), self.flow_buffer[self.bwd_id].duration))
                                 self.gui_event.set()
+                                self.log_queue.put(self.current_flow.get_flow_id())
+                                self.run_log_event.set()
+
                                 print("Flow {0} ended with duration {1:d}!".format(self.bwd_id, self.flow_buffer[self.bwd_id].duration))
 
                         self.flow_buffer[self.bwd_id].bwd_packet_count += 1

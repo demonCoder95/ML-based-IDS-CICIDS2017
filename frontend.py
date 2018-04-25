@@ -13,14 +13,24 @@ import tkinter.scrolledtext
 import flowmeter
 import threading
 import queue
+import datetime
 import time
 
-q = queue.Queue()
+gui_queue = queue.Queue()
+log_queue = queue.Queue()
+
 scan_event = threading.Event()
 gui_event = threading.Event()
+# event to signal when to dump logs into a file - based on user requirement
+log_event = threading.Event()
+run_log_event = threading.Event()
+
+dump_logs_event = threading.Event()
 
 sniffer_running = False
 gui_running = False
+log_getter_running = False
+
 
 # Main frontend for the IDS
 class MainWindow(tk.Tk):
@@ -84,15 +94,16 @@ class MainWindow(tk.Tk):
         self.exit_button.grid(row=1, column=0, padx=20, pady=20, sticky="SW")
 
         # --------------- the text box for information
+        self.NORMAL_FONT = ("TimesNewRoman", 12, "italic")
+        self.message_text_box = tk.Text(self.main_frame, padx=10, pady=10, font=self.NORMAL_FONT, bg="lightgray", height=30)
         self.message_text = "Welcome to IDS v1.0\n\nPlease select the attacks to detect and hit the \"Start Scan\" button.\n"
         self.message_text += "This program gives close to real-time performance when scanning live traffic on your host. It uses raw sockets, therefore, listens to all the interfaces for IP packets.\n"
         self.message_text += "It detects attacks using predictions from a Deep Neural Network engine that runs in the background, and relies on the feature-extraction engine to provide it with features from live traffic."
         self.message_text += "It then makes predictions about each flow of traffic received by the host, and displays them on the screen.\n\n\n\n\n\n\n\n\n"
-
-        self.message_field = tk.Message(self.main_frame, justify="left", padx=10, pady=10,
-                                    text=self.message_text, relief="sunken", font="TimesNewRoman")
-        self.message_field.configure(text=self.message_text + "\nAuthor: Noor Muhammad Malik", font=("TimesNewRoman", 12, "italic"))
-        self.message_field.grid(row=0, column=1,padx=5, pady=5, sticky="NE")
+        self.message_text_box.grid(row=0, column=1,padx=5, pady=5, sticky="NE")
+        self.message_text_box.insert(tk.INSERT, self.message_text)
+        self.message_text_box.insert(tk.END, "Author: Noor Muhammad Malik")
+        self.message_text_box.configure(state="disabled")
 
 
         # ---------------- the checkboxes frame -----------------------------------------
@@ -347,6 +358,8 @@ class MainWindow(tk.Tk):
                 return
         else:
             super(MainWindow,self).destroy()
+
+
 # GUI of the Scan Window
 class ScanWindow(tk.Toplevel):
     def __init__(self, master, *args, **kwargs):
@@ -362,7 +375,7 @@ class ScanWindow(tk.Toplevel):
         self.config(menu=self.menu_bar)
         self.sub_menu_file = tk.Menu(self.menu_bar)
         self.menu_bar.add_cascade(label="File", menu=self.sub_menu_file)
-        self.sub_menu_file.add_command(label="Exit", command=self.exit_routine)
+        self.sub_menu_file.add_command(label="Exit", command=self.destroy)
         self.sub_menu_scan = tk.Menu(self.menu_bar)
         self.menu_bar.add_cascade(label="Scan", menu=self.sub_menu_scan)
         self.sub_menu_scan.add_command(label="Start Scan", command=self.start_scan_routine)
@@ -379,36 +392,40 @@ class ScanWindow(tk.Toplevel):
         self.stop_icon = tk.PhotoImage(file="frontend/res/stop.png")
         self.stop_scan_button = tk.Button(self.toolbar, image=self.stop_icon, command=self.stop_scan_routine)
         self.stop_scan_button.pack(side="left", padx=4, pady=2)
+        self.save_icon = tk.PhotoImage(file="frontend/res/save.png")
+        self.save_button = tk.Button(self.toolbar, image=self.save_icon, command=self.save_log_routine)
+        self.save_button.pack(side="left", padx=15, pady=2)       
         self.toolbar.pack(side="top", fill="x")
-
         # -------------- main frame ----------------
         # it will handle 3 frames
         self.main_frame = tk.Frame(self, bg="gray")
         self.main_frame.pack(side="top",fill="both", expand = True, padx=10, pady=5, ipadx=10, ipady=10)
 
+        self.LARGE_FONT = ("TimesNewRoman", 16)
+
                 # live flow-data frame
         self.flow_data_frame = tk.Frame(self.main_frame, bg="gray")
         self.flow_data_frame.grid(row=0, column=0, padx=10, pady=10, ipadx=10, ipady=10)
-        self.flow_data_label = tk.Label(self.flow_data_frame, text="Live Flow Data Capture", bg="gray")
+        self.flow_data_label = tk.Label(self.flow_data_frame, text="Live Flow Data Capture", bg="gray", font=self.LARGE_FONT)
         self.flow_data_label.pack()
-        self.flow_data_box = tk.scrolledtext.ScrolledText(self.flow_data_frame, width=40, height=30)
+        self.flow_data_box = tk.scrolledtext.ScrolledText(self.flow_data_frame, width=50, height=30)
         self.flow_data_box.pack() 
 
         # the frame to hold the attack flows info
         self.attack_flows_frame = tk.Frame(self.main_frame, bg="gray")
         self.attack_flows_frame.grid(row=0, column=1, padx=10, pady=10, ipadx=10, ipady=10)
-        self.attack_flows_label = tk.Label(self.attack_flows_frame, text="Attack Flows Detected", bg="gray")
+        self.attack_flows_label = tk.Label(self.attack_flows_frame, text="Attack Flows Detected", bg="gray", font=self.LARGE_FONT)
         self.attack_flows_label.pack()
-        self.attack_flows_text = tk.scrolledtext.ScrolledText(self.attack_flows_frame, width=40, height=30)
+        self.attack_flows_text = tk.scrolledtext.ScrolledText(self.attack_flows_frame, width=50, height=30)
         self.attack_flows_text.insert(tk.INSERT, "Attack Flows Detected will go here")
         self.attack_flows_text.pack()
 
         # selected attacks frame
         self.attack_selected_frame = tk.Frame(self.main_frame, bg="gray")
         self.attack_selected_frame.grid(row=0, column=2, padx=10, pady=10, ipadx=10, ipady=10, sticky="nsew")
-        self.attack_selected_label = tk.Label(self.attack_selected_frame, text="Selected Attack(s)", bg="gray")
+        self.attack_selected_label = tk.Label(self.attack_selected_frame, text="Selected Attack(s)", bg="gray", font=self.LARGE_FONT)
         self.attack_selected_label.pack()
-        self.attack_selected_text = tk.Text(self.attack_selected_frame, width=40, height=20)
+        self.attack_selected_text = tk.Text(self.attack_selected_frame, width=40, height=30)
         # retrieve the list of attacks from main window
         self.attacks_list = MainWindow.selected_attacks
         # insert each attack name in the scan window
@@ -416,6 +433,10 @@ class ScanWindow(tk.Toplevel):
             self.attack_selected_text.insert(tk.END, each_attack + "\n")
         self.attack_selected_text.pack()
         self.attack_selected_text.configure(state="disabled")
+
+
+        # the information box feature if the verbose mode is on in the settings
+
 
         # -------------- status frame --------------
         self.status_frame = tk.Frame(self, bg="lightgray", bd=2)
@@ -435,9 +456,20 @@ class ScanWindow(tk.Toplevel):
         self.status_bar = tk.Label(self.status_frame, textvar=self.status_var, padx=20)
         self.status_bar.pack(side="left", before=self.progress_bar)
 
-        global sniffer_running, gui_running
 
+
+        global sniffer_running, gui_running, log_getter_running
         # ------------ THREADING CODE ----------------
+
+        # same thing for log_getter thread
+        if not log_getter_running:
+            self.log_getter_thread = threading.Thread(target=self.log_getter_daemon, daemon=True, name="Log Getter Thread")
+            self.log_getter_thread.start()
+            log_getter_running = True
+
+        else:
+            run_log_event.set()
+
         # if a sniffer thread wasn't started before, start it
         if not sniffer_running:
             self.sniffer_thread = threading.Thread(target=self.sniffer, daemon=True, name="Sniffer Thread")
@@ -456,6 +488,24 @@ class ScanWindow(tk.Toplevel):
             gui_running = True
         else:
             gui_event.set()
+
+
+    def save_log_routine(self):
+
+        # if the feature engine is running, don't allow to log the data
+        if scan_event.is_set():
+            tk.messagebox.showerror("Scan Running", "Can't log data when a scan is running.\nStop the running scan and try again.")
+            return
+
+        global log_event
+        response = tk.messagebox.askquestion("Save Log to File", "Are you sure you want to save the logs to a file?")
+        if response == "yes":
+            # set the event to allow the log_getter daemon to dump the logs into a disk file 
+            log_event.set()            
+        else:
+            return
+
+    
 
     def stop_scan_routine(self):
         # clear the event flag to stop scanning
@@ -476,8 +526,8 @@ class ScanWindow(tk.Toplevel):
         self.status_var.set("Scanning...")
 
     def sniffer(self):
-        global scan_event, gui_event
-        self.feature_engine = flowmeter.FlowMeter(q, scan_event, gui_event)
+        global scan_event, gui_event, gui_queue, log_queue, run_log_event
+        self.feature_engine = flowmeter.FlowMeter(gui_queue, scan_event, gui_event, log_queue, run_log_event)
         # if this is the first time running the scan, continue
         if not MainWindow.scan_running:
             scan_event.set()
@@ -491,7 +541,7 @@ class ScanWindow(tk.Toplevel):
 
     # the thread responsible for refreshing the GUI 
     def refresh_gui(self, master):
-        global q
+        global gui_queue
         global gui_event
         # make the refresh_gui code independent of the current scan window object
         # since if the window is closed (object deleted) it leaves the thread
@@ -499,7 +549,7 @@ class ScanWindow(tk.Toplevel):
         while True:    
             # wait for data to be ready to start printing
             gui_event.wait()           
-            q_data = q.get()
+            q_data = gui_queue.get()
             master.scan_window.flow_data_box.insert(tk.END, "{} : {}\n".format(q_data[0], q_data[1]))
             # master.scan_window.flow_data_box.insert(tk.END, q.get() + "\n")
             master.scan_window.flow_data_box.see(tk.END)
@@ -507,15 +557,57 @@ class ScanWindow(tk.Toplevel):
 
             # if the q is empty, block the refresh thread until there's data in q
             # to save processing time
-            if q.empty():
+            if gui_queue.empty():
                 gui_event.clear()
 
 
+    # the code for the log-getter daemon, resonsible for logging flow data
+    def log_getter_daemon(self):
+        global log_event
+        global log_queue
+        global run_log_event
+        # empty buffer to be filled by the daemon
+        log_buffer = []
 
-    def exit_routine(self):
-        response = tkinter.messagebox.askquestion("Exit", "Are you sure you want to exit?")
-        if response == "yes":
-            self.destroy()
+        # dump_log subroutine as a sub-thread for log-getter
+        def dump_logs(log_buffer, log_event):
+            while True:
+                # wait for log_event to occur
+                log_event.wait()
+                # make sure the buffer has something before dumping into the log file
+                if len(log_buffer) > 0:
+                    print("[DEBUG] writing log")
+                    # name the file as the current time-stamp for identification
+                    with open("ids_log_{}.log".format(datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H:%M:%S")), "w") as log_file:
+                        for each_entry in log_buffer:
+                            log_file.write(each_entry + "\n")
+                    print("[DEBUG] done writing log")
+                    tkinter.messagebox.showinfo("Log Written", "Program finished logging data.")
+                    # clear the event
+                    log_event.clear()
+                    # clear the log buffer
+                    log_buffer = []
+                else:
+                    tkinter.messagebox.showerror("Empty Buffer", "There is nothing to log, wait for some traffic data!")
+                log_event.clear()
+
+        # run the dump_logs daemon in background waiting for the log_event
+        dump_logs_daemon = threading.Thread(target=dump_logs, args=(log_buffer, log_event), daemon=True, name="Dump Logs Daemon")
+        dump_logs_daemon.start()
+
+        while True:
+            # wait for the feature-engine thread to signal data
+            print("[DEBUG] log_getter waiting")
+            run_log_event.wait()
+            while run_log_event.is_set():
+
+                # get the data from the log_queue and store it in the buffer
+                log_buffer.append(log_queue.get())
+                print("[DEBUG] log_getter buffered something")
+
+                # if the queue is empty, clear the event and wait for it to happen in next iteration
+                if log_queue.empty():
+                    run_log_event.clear()
 
     def destroy(self):
         if scan_event.is_set():
@@ -533,6 +625,7 @@ class ScanWindow(tk.Toplevel):
         gui_event.clear()
         # destroy the window
         super(ScanWindow, self).destroy()
+
 
 
 
