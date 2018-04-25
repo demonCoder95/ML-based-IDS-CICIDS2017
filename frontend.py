@@ -1,36 +1,52 @@
-# This module represents all of the Front-end for the IDS and will be
-# used in a thread to render the front-end of the IDS
-# Author: Noor Muhammad Malik
-# Date: April 21, 2018
-# =====================================================================
+"""
+This code is the final script for running/managing the IDS
+it is a multithreaded model, with fully functional GUI as well
+as a log-getter daemon, for efficient logging of data
 
+Author: Noor Muhammad Malik
+Date: April 21, 2018
+License: None
+=====================================================================
+"""
+
+# gui imports
 import tkinter as tk 
 from tkinter import ttk
 import tkinter.messagebox
 import tkinter.scrolledtext
 
-
+# personal modules
 import flowmeter
+
+# threading related
 import threading
 import queue
+
+# for getting timestamps - log-getter related
 import datetime
 import time
 
+# ============== GLOBAL PARAMS FOR THREAD-EVENT HANDLING ===============================
+
+# queue to exchange data between gui and feature engine
 gui_queue = queue.Queue()
+# queue to exchange data between log-getter daemon and feature engine
 log_queue = queue.Queue()
 
+# event to start/stop the feature-engine daemon
 scan_event = threading.Event()
+# event to signal the gui to refresh itself after editing something on it
 gui_event = threading.Event()
 # event to signal when to dump logs into a file - based on user requirement
 log_event = threading.Event()
+# event to signal for the logging-daemon to start/stop
 run_log_event = threading.Event()
+#=======================================================================================
 
-dump_logs_event = threading.Event()
-
+# bool indicators to keep track of running threads when scan window is re-instantiated
 sniffer_running = False
 gui_running = False
 log_getter_running = False
-
 
 # Main frontend for the IDS
 class MainWindow(tk.Tk):
@@ -489,24 +505,23 @@ class ScanWindow(tk.Toplevel):
         else:
             gui_event.set()
 
-
+    # event handler for save log button
     def save_log_routine(self):
 
         # if the feature engine is running, don't allow to log the data
         if scan_event.is_set():
-            tk.messagebox.showerror("Scan Running", "Can't log data when a scan is running.\nStop the running scan and try again.")
+            tk.messagebox.showerror("Scan Running", "Can't log data when a scan is running.\nStop the running scan and try again.", parent=self)
             return
 
         global log_event
-        response = tk.messagebox.askquestion("Save Log to File", "Are you sure you want to save the logs to a file?")
+        response = tk.messagebox.askquestion("Save Log to File", "Are you sure you want to save the logs to a file?", parent=self)
         if response == "yes":
             # set the event to allow the log_getter daemon to dump the logs into a disk file 
             log_event.set()            
         else:
             return
 
-    
-
+    # event handlers for start/stop buttons
     def stop_scan_routine(self):
         # clear the event flag to stop scanning
         if scan_event.is_set():
@@ -515,7 +530,7 @@ class ScanWindow(tk.Toplevel):
         # stop the progress bar
         self.progress_bar.stop()
         self.status_var.set("Scan Stopped")
-
+   
     def start_scan_routine(self):
         # set the event flag to start scanning
         if not scan_event.is_set():
@@ -525,6 +540,7 @@ class ScanWindow(tk.Toplevel):
         self.progress_bar.start(10)
         self.status_var.set("Scanning...")
 
+    # the thread for running feature-engine daemon
     def sniffer(self):
         global scan_event, gui_event, gui_queue, log_queue, run_log_event
         self.feature_engine = flowmeter.FlowMeter(gui_queue, scan_event, gui_event, log_queue, run_log_event)
@@ -560,7 +576,6 @@ class ScanWindow(tk.Toplevel):
             if gui_queue.empty():
                 gui_event.clear()
 
-
     # the code for the log-getter daemon, resonsible for logging flow data
     def log_getter_daemon(self):
         global log_event
@@ -570,7 +585,7 @@ class ScanWindow(tk.Toplevel):
         log_buffer = []
 
         # dump_log subroutine as a sub-thread for log-getter
-        def dump_logs(log_buffer, log_event):
+        def dump_logs(log_buffer, log_event, self):
             while True:
                 # wait for log_event to occur
                 log_event.wait()
@@ -582,17 +597,17 @@ class ScanWindow(tk.Toplevel):
                         for each_entry in log_buffer:
                             log_file.write(each_entry + "\n")
                     print("[DEBUG] done writing log")
-                    tkinter.messagebox.showinfo("Log Written", "Program finished logging data.")
+                    tkinter.messagebox.showinfo("Log Written", "Program finished logging data.", parent=self)
                     # clear the event
                     log_event.clear()
                     # clear the log buffer
                     log_buffer = []
                 else:
-                    tkinter.messagebox.showerror("Empty Buffer", "There is nothing to log, wait for some traffic data!")
+                    tkinter.messagebox.showerror("Empty Buffer", "There is nothing to log, wait for some traffic data!", parent=self)
                 log_event.clear()
 
         # run the dump_logs daemon in background waiting for the log_event
-        dump_logs_daemon = threading.Thread(target=dump_logs, args=(log_buffer, log_event), daemon=True, name="Dump Logs Daemon")
+        dump_logs_daemon = threading.Thread(target=dump_logs, args=(log_buffer, log_event, self), daemon=True, name="Dump Logs Daemon")
         dump_logs_daemon.start()
 
         while True:
@@ -611,7 +626,7 @@ class ScanWindow(tk.Toplevel):
 
     def destroy(self):
         if scan_event.is_set():
-            response = tkinter.messagebox.askquestion("Exit", "A scan is in progress, are you sure you want to exit?")
+            response = tkinter.messagebox.askquestion("Exit", "A scan is in progress, are you sure you want to exit?", parent=self)
             if response == "yes":
                 pass
             else:
@@ -625,9 +640,6 @@ class ScanWindow(tk.Toplevel):
         gui_event.clear()
         # destroy the window
         super(ScanWindow, self).destroy()
-
-
-
 
 
 # generate the main gui window
