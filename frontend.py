@@ -1,4 +1,5 @@
 """
+=====================================================================
 This code is the final script for running/managing the IDS
 it is a multithreaded model, with fully functional GUI as well
 as a log-getter daemon, for efficient logging of data
@@ -585,7 +586,8 @@ class ScanWindow(tk.Toplevel):
         log_buffer = []
 
         # dump_log subroutine as a sub-thread for log-getter
-        def dump_logs(log_buffer, log_event, self):
+        def dump_logs(log_event, self):
+            nonlocal log_buffer
             while True:
                 # wait for log_event to occur
                 log_event.wait()
@@ -593,21 +595,21 @@ class ScanWindow(tk.Toplevel):
                 if len(log_buffer) > 0:
                     print("[DEBUG] writing log")
                     # name the file as the current time-stamp for identification
-                    with open("ids_log_{}.log".format(datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H:%M:%S")), "w") as log_file:
+                    with open("logs/ids_log_{}.log".format(datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H:%M:%S")), "w") as log_file:
                         for each_entry in log_buffer:
                             log_file.write(each_entry + "\n")
                     print("[DEBUG] done writing log")
                     tkinter.messagebox.showinfo("Log Written", "Program finished logging data.", parent=self)
                     # clear the event
                     log_event.clear()
-                    # clear the log buffer
+                    # clear the log buffer BUGGGG!!
                     log_buffer = []
                 else:
                     tkinter.messagebox.showerror("Empty Buffer", "There is nothing to log, wait for some traffic data!", parent=self)
-                log_event.clear()
+                    log_event.clear()
 
         # run the dump_logs daemon in background waiting for the log_event
-        dump_logs_daemon = threading.Thread(target=dump_logs, args=(log_buffer, log_event, self), daemon=True, name="Dump Logs Daemon")
+        dump_logs_daemon = threading.Thread(target=dump_logs, args=(log_event, self), daemon=True, name="Dump Logs Daemon")
         dump_logs_daemon.start()
 
         while True:
