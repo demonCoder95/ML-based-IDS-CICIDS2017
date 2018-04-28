@@ -30,7 +30,7 @@ class FlowMeter():
         else:
             return False, False
 
-    def __init__(self, gui_queue, scan_event, gui_event, log_queue, run_log_event):
+    def __init__(self, scan_event, gui_queue, gui_event, log_queue, run_log_event, engine_dnn_queue, dnn_ready_event):
         # clear screen to begin
         os.system("clear")
 
@@ -44,6 +44,10 @@ class FlowMeter():
         self.gui_event = gui_event
         # event object for signalling log buffer to append given data
         self.run_log_event = run_log_event
+        # queue to sync engine with the DNN
+        self.engine_dnn_queue = engine_dnn_queue
+        # event object to know when the DNN is ready
+        self.dnn_ready_event = dnn_ready_event
 
         # create sniffer socket and set it to recieve packets
         self.sniffer_socket = socket.socket(socket.PF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
@@ -82,11 +86,14 @@ class FlowMeter():
 
     # run the main flow_meter
     def run_flow_meter(self):
+        # wait to let the DNN get loaded
+        self.dnn_ready_event.wait()
+
         # wait until the event is signalled by the main thread
         while True:    
-            print("[DEBUG] sniffer waiting for event")
+            print("[DEBUG-sniffer]  waiting for event")
             self.scan_event.wait()
-            print("[DEBUG] sniffer event happened!")
+            print("[DEBUG-sniffer]  event happened!")
 
             # while the scan event is set keep scanning
             # if the event is cleared, the scanning loop ends and the outer loops makes the 
@@ -155,6 +162,11 @@ class FlowMeter():
                     # first packet of flow will always be in the fwd direction
                     self.current_flow.fwd_packet_count += 1
 
+                    # set the init_win_bytes_forward feature value
+                    if self.is_ip and self.ip_header['protocol'] == 0x6:
+                        self.flow_buffer[self.fwd_id].init_win_bytes_forward = self.tcp_header['win_size']
+
+
                     # print("{0:<46s}{1:<12d} {2:<12f} {3:<12d} {4:<12d} {5:<12d}".format(
                     #     self.fwd_id,
                     #     self.current_flow.packet_count,
@@ -171,7 +183,12 @@ class FlowMeter():
                     if self.exist_tuple[1] and self.exist_tuple[0]:                
                         # if the flow-id is fwd-id, increment fwd_packet_count
                         self.flow_buffer[self.fwd_id].fwd_packet_count += 1
+                        # increment the total packet count
                         self.flow_buffer[self.fwd_id].packet_count += 1
+                        # increment the psh_flag_count if applicable
+                        if self.is_ip and self.ip_header['protocol'] == 0x6 and self.tcp_header['psh_flag'] == 1:
+                            self.flow_buffer[self.fwd_id].psh_flag_count += 1
+
                         # print("{0:<46s}{1:<12d} {2:<12f} {3:<12d} {4:<12d} {5:<12d}".format(
                         # self.fwd_id,
                         # self.flow_buffer[self.fwd_id].packet_count,
@@ -184,22 +201,42 @@ class FlowMeter():
                         # only compute the bwd-id in case of bwd packet for faster processing
                         self.bwd_id =  networking.Flow.make_reverse_flow(self.current_flow)
 
+                        # increment the psh_flag_count if applicable
+                        if self.is_ip and self.ip_header['protocol'] == 0x6 and self.tcp_header['psh_flag'] == 1:
+                            self.flow_buffer[self.bwd_id].psh_flag_count += 1
+
                         # teardown is checked only in case of bwd_packet, since bwd_packet is the final FIN packet
                         # of a tcp 4-way teardown!
                         # or, a flow might end because of an rst-flag
                         # look for tcp first, since udp packets will give key-error for fin_flag!
                         if self.ip_header['protocol'] == 0x6 and (self.tcp_header['fin_flag'] or self.tcp_header['rst_flag']) == 1:
                             self.flow_buffer[self.bwd_id].duration = int((time.time() - self.flow_buffer[self.bwd_id].start_time) * 1000000)
+                            self.flow_buffer[self.bwd_id].bwd_packets_per_second = (self.flow_buffer[self.bwd_id].bwd_packet_count / self.flow_buffer[self.bwd_id].duration) * 1000000
+
                             
                             # put the flows that are finished into the queue and send to GUI
                             # as well as to send to the neural network for predictions
                             if self.scan_event.is_set():
-                                self.gui_queue.put((self.current_flow.get_flow_id(), self.flow_buffer[self.bwd_id].duration))
+                                self.gui_queue.put((
+                                    self.current_flow.get_flow_id(),
+                                    self.flow_buffer[self.bwd_id].duration,
+                                    self.flow_buffer[self.bwd_id].bwd_packets_per_second,
+                                    self.flow_buffer[self.bwd_id].psh_flag_count,
+                                    self.flow_buffer[self.bwd_id].init_win_bytes_forward))
                                 self.gui_event.set()
                                 self.log_queue.put(self.current_flow.get_flow_id())
                                 self.run_log_event.set()
+                                # send a dictionary of feature vector to the DNN with corresponding attacks
+                                self.engine_dnn_queue.put({"portscan":[
+                                    self.flow_buffer[self.bwd_id].bwd_packets_per_second,
+                                    self.flow_buffer[self.bwd_id].psh_flag_count,
+                                    self.flow_buffer[self.bwd_id].init_win_bytes_forward
+                                ]})
 
-                                print("Flow {0} ended with duration {1:d}!".format(self.bwd_id, self.flow_buffer[self.bwd_id].duration))
+                                # print("Flow {0} ended with duration {1:d}!".format(self.bwd_id, self.flow_buffer[self.bwd_id].duration))
+                                # print("Flow {} had bwd_packets_per_second {}".format(self.bwd_id, self.flow_buffer[self.bwd_id].bwd_packets_per_second))
+                                # print("Flow {} had init_win_bytes_fwd {}".format(self.bwd_id, self.flow_buffer[self.bwd_id].init_win_bytes_fwd))
+                                # print("Flow {} had psh_flag_count {}".format(self.bwd_id, self.flow_buffer[self.bwd_id].psh_flag_count))
 
                         self.flow_buffer[self.bwd_id].bwd_packet_count += 1
                         self.flow_buffer[self.bwd_id].packet_count += 1

@@ -27,12 +27,18 @@ import queue
 import datetime
 import time
 
+
+
 # ============== GLOBAL PARAMS FOR THREAD-EVENT HANDLING ===============================
 
-# queue to exchange data between gui and feature engine
+# queue to exchange data between GUI and feature-engine
 gui_queue = queue.Queue()
-# queue to exchange data between log-getter daemon and feature engine
+# queue to exchange data between log-getter daemon and feature-engine
 log_queue = queue.Queue()
+# queue to exchange data between feature-engine and DNN
+engine_dnn_queue = queue.Queue()
+# queue to exchange data between DNN and GUI
+dnn_gui_queue = queue.Queue()
 
 # event to start/stop the feature-engine daemon
 scan_event = threading.Event()
@@ -42,12 +48,15 @@ gui_event = threading.Event()
 log_event = threading.Event()
 # event to signal for the logging-daemon to start/stop
 run_log_event = threading.Event()
+# event to signal DNN thread ready for predictions - only used during the start
+dnn_ready_event = threading.Event()
 #=======================================================================================
 
-# bool indicators to keep track of running threads when scan window is re-instantiated
+# bool indicators to keep track of running daemons when scan window is re-instantiated
 sniffer_running = False
 gui_running = False
 log_getter_running = False
+dnn_running = False
 
 # Main frontend for the IDS
 class MainWindow(tk.Tk):
@@ -397,9 +406,12 @@ class ScanWindow(tk.Toplevel):
         self.menu_bar.add_cascade(label="Scan", menu=self.sub_menu_scan)
         self.sub_menu_scan.add_command(label="Start Scan", command=self.start_scan_routine)
         self.sub_menu_scan.add_command(label="Stop Scan", command=self.stop_scan_routine)
+        self.sub_menu_view = tk.Menu(self.menu_bar)
+        self.menu_bar.add_cascade(label="View", menu=self.sub_menu_view)
+        self.sub_menu_view.add_command(label="Live Error Graph", command=self.graph_routine)
         self.sub_menu_help = tk.Menu(self.menu_bar)
         self.menu_bar.add_cascade(label="Help", menu=self.sub_menu_help)
-        self.sub_menu_help.add_command(label="Show basic help")
+        self.sub_menu_help.add_command(label="Show basic help", command=self.help_routine)
 
         # --------------- tool bar ----------------------------
         self.toolbar = tk.Frame(self, bg="gray")
@@ -453,6 +465,7 @@ class ScanWindow(tk.Toplevel):
 
 
         # the information box feature if the verbose mode is on in the settings
+        # maybe implement later, too much to do!
 
 
         # -------------- status frame --------------
@@ -475,7 +488,7 @@ class ScanWindow(tk.Toplevel):
 
 
 
-        global sniffer_running, gui_running, log_getter_running
+        global sniffer_running, gui_running, log_getter_running, dnn_running
         # ------------ THREADING CODE ----------------
 
         # same thing for log_getter thread
@@ -505,6 +518,15 @@ class ScanWindow(tk.Toplevel):
             gui_running = True
         else:
             gui_event.set()
+
+
+        # the DNN thread
+        if not dnn_running:
+            self.dnn_thread = threading.Thread(target=self.dnn_routine, daemon=True, name="DNN Thread")
+            self.dnn_thread.start()
+            dnn_running = True
+
+
 
     # event handler for save log button
     def save_log_routine(self):
@@ -543,8 +565,8 @@ class ScanWindow(tk.Toplevel):
 
     # the thread for running feature-engine daemon
     def sniffer(self):
-        global scan_event, gui_event, gui_queue, log_queue, run_log_event
-        self.feature_engine = flowmeter.FlowMeter(gui_queue, scan_event, gui_event, log_queue, run_log_event)
+        global scan_event, gui_event, gui_queue, log_queue, run_log_event, engine_dnn_queue, dnn_ready_event
+        self.feature_engine = flowmeter.FlowMeter(scan_event, gui_queue, gui_event, log_queue, run_log_event, engine_dnn_queue, dnn_ready_event)
         # if this is the first time running the scan, continue
         if not MainWindow.scan_running:
             scan_event.set()
@@ -555,6 +577,10 @@ class ScanWindow(tk.Toplevel):
         else:
             scan_event.set()
             self.feature_engine.run_flow_meter()
+
+    def dnn_routine(self, attacks_list):
+        
+        pass
 
     # the thread responsible for refreshing the GUI 
     def refresh_gui(self, master):
@@ -567,7 +593,7 @@ class ScanWindow(tk.Toplevel):
             # wait for data to be ready to start printing
             gui_event.wait()           
             q_data = gui_queue.get()
-            master.scan_window.flow_data_box.insert(tk.END, "{} : {}\n".format(q_data[0], q_data[1]))
+            master.scan_window.flow_data_box.insert(tk.END, "{} : {} [{}, {}, {}]\n".format(q_data[0], q_data[1], q_data[2], q_data[3], q_data[4]))
             # master.scan_window.flow_data_box.insert(tk.END, q.get() + "\n")
             master.scan_window.flow_data_box.see(tk.END)
             master.scan_window.update()
@@ -625,6 +651,14 @@ class ScanWindow(tk.Toplevel):
                 # if the queue is empty, clear the event and wait for it to happen in next iteration
                 if log_queue.empty():
                     run_log_event.clear()
+
+    # the code for drawing a live graph
+    def graph_routine(self):
+        pass
+
+    # the code for displaying help
+    def help_routine(self):
+        pass
 
     def destroy(self):
         if scan_event.is_set():
