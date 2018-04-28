@@ -5,8 +5,6 @@
  Date: April 15, 2018
  License: None
 
- MULTI-THREADED CODE FOR GUI AND DNN HANDLING
-
 '''
 # the structures for flow detection
 import networking
@@ -123,10 +121,17 @@ def main():
             # add the flow object to the dict() buffer
             flow_buffer[fwd_id] = current_flow
             
+            if is_ip and ip_header['protocol'] == 0x6:
+                # set the init_win_bytes_fwd feature value
+                flow_buffer[fwd_id].init_win_bytes_fwd = tcp_header["win_size"]
+
             # increase the packet count
             current_flow.packet_count += 1
             # first packet of flow will always be in the fwd direction
             current_flow.fwd_packet_count += 1
+
+            # first packet of flow cannot have a PSH flag, EVER! no need to check for it
+
 
             print("{0:<46s}{1:<12d} {2:<12f} {3:<12d} {4:<12d} {5:<12d}".format(
                 fwd_id,
@@ -145,6 +150,10 @@ def main():
                 # if the flow-id is fwd-id, increment fwd_packet_count
                 flow_buffer[fwd_id].fwd_packet_count += 1
                 flow_buffer[fwd_id].packet_count += 1
+                if is_ip and ip_header['protocol'] == 0x6 and tcp_header['psh_flag'] == 1:
+                    # increase the psh_flag count
+                    flow_buffer[fwd_id].psh_flag_count += 1
+
                 print("{0:<46s}{1:<12d} {2:<12f} {3:<12d} {4:<12d} {5:<12d}".format(
                 fwd_id,
                 flow_buffer[fwd_id].packet_count,
@@ -157,6 +166,12 @@ def main():
                 # only compute the bwd-id in case of bwd packet for faster processing
                 bwd_id =  networking.Flow.make_reverse_flow(current_flow)
 
+                flow_buffer[bwd_id].bwd_packet_count += 1
+                flow_buffer[bwd_id].packet_count += 1
+                if is_ip and ip_header['protocol'] == 0x6 and tcp_header['psh_flag'] == 1:
+                    # increase the psh_flag count
+                    flow_buffer[bwd_id].psh_flag_count += 1
+
                 # teardown is checked only in case of bwd_packet, since bwd_packet is the final FIN packet
                 # of a tcp 4-way teardown!
                 # or, a flow might end because of an rst-flag
@@ -164,9 +179,12 @@ def main():
                 if ip_header['protocol'] == 0x6 and (tcp_header['fin_flag'] or tcp_header['rst_flag']) == 1:
                     flow_buffer[bwd_id].duration = int((time.time() - flow_buffer[bwd_id].start_time) * 1000000)
                     print("Flow {0} ended with duration {1:d}!".format(bwd_id, flow_buffer[bwd_id].duration))
+                    # compute the bwd_packets/s feature
+                    flow_buffer[bwd_id].bwd_packets_per_second = (flow_buffer[bwd_id].bwd_packet_count / flow_buffer[bwd_id].duration) * 1000000
+                    print("Flow {} had bwd_packets_per_second {}".format(bwd_id, flow_buffer[bwd_id].bwd_packets_per_second))
+                    print("Flow {} had init_win_bytes_fwd {}".format(bwd_id, flow_buffer[bwd_id].init_win_bytes_fwd))
+                    print("Flow {} had psh_flag_count {}".format(bwd_id, flow_buffer[bwd_id].psh_flag_count))
 
-                flow_buffer[bwd_id].bwd_packet_count += 1
-                flow_buffer[bwd_id].packet_count += 1
                 print("{0:<46s}{1:<12d} {2:<12f} {3:<12d} {4:<12d} {5:<12d}".format(
                 bwd_id,
                 flow_buffer[bwd_id].packet_count,

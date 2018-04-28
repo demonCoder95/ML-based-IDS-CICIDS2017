@@ -1,6 +1,8 @@
 '''
     This implements some simple structures requried for the feature
     extraction engine in the IDS
+    Author: Noor Muhammad Malik
+    License: None
 '''
 
 # a bidirectional flow is characterized by a 5-tuple
@@ -20,6 +22,9 @@ class Flow:
         self.packet_count = 0 # total number of packets seen belonging to this flow
         self.start_time = 0.0 # determine the starting timestamp to determine flow duration
         self.flow_duration = 0    # the duration of flow in microseconds
+        self.bwd_packets_per_second = 0.0 # a feature itself
+        self.init_win_bytes_fwd = 0 # a feature itself
+        self.psh_flag_count = 0 # a feature itself
 
     def get_flow_id(self):
         self.flow_id = "{0}-{1}-{2}-{3}-{4}".format(self.src_ip, self.src_port, self.dest_ip, self.dest_port, self.protocol)

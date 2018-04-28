@@ -18,6 +18,7 @@ import tkinter.scrolledtext
 
 # personal modules
 import flowmeter
+import dnnengine
 
 # threading related
 import threading
@@ -527,7 +528,6 @@ class ScanWindow(tk.Toplevel):
             dnn_running = True
 
 
-
     # event handler for save log button
     def save_log_routine(self):
 
@@ -578,17 +578,21 @@ class ScanWindow(tk.Toplevel):
             scan_event.set()
             self.feature_engine.run_flow_meter()
 
-    def dnn_routine(self, attacks_list):
-        
-        pass
+    # the thread for running the DNN daemon
+    def dnn_routine(self):
+        global dnn_ready_event, engine_dnn_queue, dnn_gui_queue
+        self.dnn_engine = dnnengine.DNNEngine(MainWindow.selected_attacks, dnn_ready_event, engine_dnn_queue, dnn_gui_queue)
+        self.dnn_engine.run_dnn_engine()
 
     # the thread responsible for refreshing the GUI 
     def refresh_gui(self, master):
         global gui_queue
-        global gui_event
+        global gui_event, dnn_ready_event
         # make the refresh_gui code independent of the current scan window object
         # since if the window is closed (object deleted) it leaves the thread
         # with a dangling 'self' pointer and raises an exception
+        # wait for the dnn to get ready
+        dnn_ready_event.wait()
         while True:    
             # wait for data to be ready to start printing
             gui_event.wait()           
@@ -619,12 +623,12 @@ class ScanWindow(tk.Toplevel):
                 log_event.wait()
                 # make sure the buffer has something before dumping into the log file
                 if len(log_buffer) > 0:
-                    print("[DEBUG] writing log")
+                    print("[DEBUG-LogGetter] writing log")
                     # name the file as the current time-stamp for identification
                     with open("logs/ids_log_{}.log".format(datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H:%M:%S")), "w") as log_file:
                         for each_entry in log_buffer:
                             log_file.write(each_entry + "\n")
-                    print("[DEBUG] done writing log")
+                    print("[DEBUG-LogGetter] done writing log")
                     tkinter.messagebox.showinfo("Log Written", "Program finished logging data.", parent=self)
                     # clear the event
                     log_event.clear()
@@ -640,13 +644,13 @@ class ScanWindow(tk.Toplevel):
 
         while True:
             # wait for the feature-engine thread to signal data
-            print("[DEBUG] log_getter waiting")
+            print("[DEBUG-LogGetter] waiting")
             run_log_event.wait()
             while run_log_event.is_set():
 
                 # get the data from the log_queue and store it in the buffer
                 log_buffer.append(log_queue.get())
-                print("[DEBUG] log_getter buffered something")
+                print("[DEBUG-LogGetter] buffered something")
 
                 # if the queue is empty, clear the event and wait for it to happen in next iteration
                 if log_queue.empty():
