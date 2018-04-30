@@ -231,8 +231,9 @@ class FlowMeter():
                                     self.current_flow.get_flow_id(),
                                     self.flow_buffer[self.bwd_id].bwd_packets_per_second,
                                     self.flow_buffer[self.bwd_id].psh_flag_count,
-                                    self.flow_buffer[self.bwd_id].init_win_bytes_forward
-                                ]})
+                                    self.flow_buffer[self.bwd_id].init_win_bytes_forward],
+                                    "other" : [self.flow_buffer[self.bwd_id].duration]
+                                })
 
                                 # print("Flow {0} ended with duration {1:d}!".format(self.bwd_id, self.flow_buffer[self.bwd_id].duration))
                                 # print("Flow {} had bwd_packets_per_second {}".format(self.bwd_id, self.flow_buffer[self.bwd_id].bwd_packets_per_second))

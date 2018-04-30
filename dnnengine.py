@@ -12,14 +12,18 @@ from keras.models import load_model
 from keras.models import Model
 from sklearn import metrics
 
+# for sending statistics to the graphing gui
+import threading, time
+
 class DNNEngine():
-    def __init__(self, attacks_list, dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event):
+    def __init__(self, attacks_list, dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event, dnn_graph_queue):
         
         # keep the 'stuff'
         self.attacks_list = attacks_list
         self.engine_dnn_queue = engine_dnn_queue
         self.dnn_gui_queue = dnn_gui_queue
         self.gui_event = gui_event
+        self.dnn_graph_queue = dnn_graph_queue
 
         # load all the models
         self.models = dict()
@@ -37,6 +41,27 @@ class DNNEngine():
         dnn_ready_event.set()
 
     def run_dnn_engine(self):
+
+        detection_threshold = 200
+
+        # variables for statitical graphing queue
+        fp_count = 0    # number of false positives
+        fn_count = 0    # number of false negatives
+        tp_count = 0    # number of true positives
+
+        # send the stat data to the graphing GUI every second
+        def send_stats():
+            nonlocal fp_count, fn_count, tp_count
+            while True:
+                time.sleep(1)
+                # only pass non-zero tp_count values
+                if tp_count > 0:
+                    self.dnn_graph_queue.put((fp_count, fn_count, tp_count))
+
+        # thread to send data to the graphing gui
+        stat_thread = threading.Thread(target=send_stats, name="Send Stat Thread", daemon=True)
+        stat_thread.start()
+
         while True:
             # wait for the data on the queue
             raw_data = self.engine_dnn_queue.get()
@@ -53,6 +78,26 @@ class DNNEngine():
             print("[DEBUG-DNN] predicting...")
             pred_prob = self.models["portscan"].predict(matrix_input)
             pred_index = np.argmax(pred_prob, axis=1)
+
+            flow_duration = raw_data["other"][0]
+            # check for false positives
+            if flow_duration > detection_threshold and pred_index[0] == 0:
+                fp_count += 1
+                print("[DEBUG-DNN] fp_count = {}".format(fp_count))
+            # else, it's a true positive
+            else:
+                tp_count += 1
+            
+            # check for false negatives
+            if flow_duration < detection_threshold and pred_index[0] == 1:
+                fn_count += 1
+                print("[DEBUG-DNN] fn_count = {}".format(fn_count))
+            #else, it's a true positive
+            else:
+                tp_count += 1
+
+            print("[DEBUG-DNN] tp_count = {}".format(tp_count))
+
             if pred_index[0] == 0:
                 print("[DEBUG-DNN] ATTACK: {}%".format(pred_prob[0][pred_index[0]]*100))
                 # GUI only needs attack traffic flows

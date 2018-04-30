@@ -50,6 +50,8 @@ log_queue = queue.Queue()
 engine_dnn_queue = queue.Queue()
 # queue to exchange data between DNN and GUI
 dnn_gui_queue = queue.Queue()
+# queue to exchange data between DNN and Graph Window
+dnn_graph_queue = queue.Queue()
 
 # event to start/stop the feature-engine daemon
 scan_event = threading.Event()
@@ -137,7 +139,7 @@ class MainWindow(tk.Tk):
         self.message_text += "This program gives close to real-time performance when scanning live traffic on your host. It uses raw sockets, therefore, listens to all the interfaces for IP packets.\n"
         self.message_text += "It detects attacks using predictions from a Deep Neural Network engine that runs in the background, and relies on the feature-extraction engine to provide it with features from live traffic."
         self.message_text += "It then makes predictions about each flow of traffic received by the host, and displays them on the screen.\n\n\n\n\n\n\n\n\n"
-        self.message_text_box.grid(row=0, column=1,padx=5, pady=5, sticky="NE")
+        self.message_text_box.grid(row=0, column=1,padx=5, pady=5, sticky="NSEW")
         self.message_text_box.insert(tk.INSERT, self.message_text)
         self.message_text_box.insert(tk.END, "Author: Noor Muhammad Malik")
         self.message_text_box.configure(state="disabled")
@@ -145,10 +147,10 @@ class MainWindow(tk.Tk):
 
         # ---------------- the checkboxes frame -----------------------------------------
         self.check_frame = tk.Frame(self.main_frame)
-        self.check_frame.grid(row=0, column=0, padx=5, pady=5, sticky="NW", ipady=5, ipadx=5)
+        self.check_frame.grid(row=0, column=0, padx=5, pady=5, sticky="NSEW", ipady=5, ipadx=5)
 
         # add the title label
-        self.select_attack_label = tk.Label(self.check_frame, text="Select the attacks to detect by the IDS, for details of the attack, see the help section.", font=("TimesNewRoman", 12, "italic"))
+        self.select_attack_label = tk.Label(self.check_frame, text="Select the attacks to detect by the IDS.\n For details of the attacks, see the help section.", font=("TimesNewRoman", 12, "italic"))
         self.select_attack_label.pack(padx=10, pady=5)
         # adding checkbuttons for each individual attack
         self.dos_hulk_var = tk.StringVar(self.check_frame)
@@ -588,8 +590,8 @@ class ScanWindow(tk.Toplevel):
 
     # the thread for running the DNN daemon
     def dnn_routine(self):
-        global dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event
-        self.dnn_engine = dnnengine.DNNEngine(MainWindow.selected_attacks, dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event)
+        global dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event, dnn_graph_queue
+        self.dnn_engine = dnnengine.DNNEngine(MainWindow.selected_attacks, dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event, dnn_graph_queue)
         self.dnn_engine.run_dnn_engine()
 
     # the thread responsible for refreshing the GUI 
@@ -688,6 +690,8 @@ class ScanWindow(tk.Toplevel):
 
     # the code for drawing a live graph
     def graph_routine(self):
+        # get graphing data from this queue, put in by the DNN
+        global dnn_graph_queue
 
         # some local event functions
         def exit_button():
@@ -697,37 +701,86 @@ class ScanWindow(tk.Toplevel):
         self.graph_window = tk.Toplevel(master=self)
         self.graph_window.title("RealTime DNN Statistics Graphs")
 
-        x = [1, 2, 3]
-        y = [0.1, 0.3, 0.5]
+        # some starting values for graphing animation
+        x = [1]
+        y_prec = [0.5]
+        y_recall = [0.5]
 
         def tick_method(i):
-            nonlocal x, y, fig_prec_plot, fig_recall_plot
+            nonlocal x, y_prec, y_recall, fig_prec_plot, fig_recall_plot
             # to start/stop the graph animation along with the scan
             global scan_event
+            global dnn_graph_queue
 
             # if the scan is not running, don't do anything!
             if not scan_event.is_set():
                 return
             # otherwise, just continue with the usual stuff!
             else:
-                # add a random value to the array every second
-                if len(x) > 10:
-                    x.remove(x[0])
-                x.append(x[len(x) - 1] + 1)
-                if len(y) > 10:
-                    y.remove(y[0])
-                y.append(np.random.randint(1, 10)/10.0)
-                fig_prec_plot.clear()
-                fig_prec_plot.plot(x, y)
-                fig_prec_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Precision RealTime")
-                limits = fig_prec_plot.axis()
-                fig_prec_plot.axis([limits[0], limits[1], 0, 1])
 
-                fig_recall_plot.clear()
-                fig_recall_plot.plot(x, y)
-                fig_recall_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Recall RealTime")
-                limits=fig_recall_plot.axis()
-                fig_recall_plot.axis([limits[0], limits[1], 0, 1])
+                # pull data off of the queue 
+                try:
+                    q_data =  dnn_graph_queue.get(block=False)
+
+                # if the queue is empty, retain older y values
+                except queue.Empty:
+                    if len(x) > 10:
+                        x.remove(x[0])
+
+                    x.append(x[len(x) - 1] + 1)
+                    
+                    if len(y_prec) > 10:
+                        y_prec.remove(y_prec[0])
+
+                    y_prec.append(y_prec[len(y_prec) - 1])                    
+    
+                    fig_prec_plot.clear()
+                    fig_prec_plot.plot(x, y_prec)
+                    fig_prec_plot.set(xlabel="time (s)", ylabel="Precision", title="Precision RealTime")
+                    limits = fig_prec_plot.axis()
+                    fig_prec_plot.axis([limits[0], limits[1], 0, 1.2])
+
+                    if len(y_recall) > 10:
+                        y_recall.remove(y_recall[0])
+
+                    y_recall.append(y_recall[len(y_recall) -1])
+
+                    fig_recall_plot.clear()
+                    fig_recall_plot.plot(x, y_recall)
+                    fig_recall_plot.set(xlabel="time (s)", ylabel="Recall", title="Recall RealTime")
+                    limits=fig_recall_plot.axis()
+                    fig_recall_plot.axis([limits[0], limits[1], 0, 1.2])
+
+                # if the queue wasn't empty, get the newer y values from it
+                else:
+                    if len(x) > 10:
+                        x.remove(x[0])
+                    
+                    x.append(x[len(x) - 1] + 1)
+                    
+                    if len(y_prec) > 10:
+                        y_prec.remove(y_prec[0])
+                    # prec = tp / tp + fp
+                    precision = float(q_data[2]) / (q_data[2] + q_data[0])
+                    y_prec.append(precision)
+                    
+                    fig_prec_plot.clear()
+                    fig_prec_plot.plot(x, y_prec)
+                    fig_prec_plot.set(xlabel="time (s)", ylabel="Precision", title="Precision RealTime")
+                    limits = fig_prec_plot.axis()
+                    fig_prec_plot.axis([limits[0], limits[1], 0, 1.2])
+
+                    if len(y_recall) > 10:
+                        y_recall.remove(y_recall[0])
+                    # recall = tp/ tp + fn
+                    recall = float(q_data[2]) / (q_data[2] + q_data[1])
+                    y_recall.append(recall)
+
+                    fig_recall_plot.clear()
+                    fig_recall_plot.plot(x, y_recall)
+                    fig_recall_plot.set(xlabel="time (s)", ylabel="Recall", title="Recall RealTime")
+                    limits=fig_recall_plot.axis()
+                    fig_recall_plot.axis([limits[0], limits[1], 0, 1.2])
 
         # the main graphing frame, for tkinter purposes
         graph_frame = tk.Frame(self.graph_window)
@@ -738,16 +791,16 @@ class ScanWindow(tk.Toplevel):
 
         # the precision subplot on the main_figure
         fig_prec_plot = main_figure.add_subplot(121)
-        fig_prec_plot.plot(x, y)
-        fig_prec_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Precision RealTime")
+        fig_prec_plot.plot(x, y_prec)
+        fig_prec_plot.set(xlabel="time (s)", ylabel="Precision", title="Precision RealTime")
         limits = fig_prec_plot.axis()
-        fig_prec_plot.axis([limits[0], limits[1], 0, 1])
+        fig_prec_plot.axis([limits[0], limits[1], 0, 1.2])
         # the recall subplot on the main_figure
         fig_recall_plot = main_figure.add_subplot(122)
-        fig_recall_plot.plot(x, y)
-        fig_recall_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Recall RealTime")
+        fig_recall_plot.plot(x, y_recall)
+        fig_recall_plot.set(xlabel="time (s)", ylabel="Recall", title="Recall RealTime")
         limits = fig_recall_plot.axis()
-        fig_recall_plot.axis([limits[0], limits[1], 0, 1])
+        fig_recall_plot.axis([limits[0], limits[1], 0, 1.2])
 
         # draw stuff on the canvas to link tkinter and matplotlib figure
         canvas = FigureCanvasTkAgg(main_figure, graph_frame)
