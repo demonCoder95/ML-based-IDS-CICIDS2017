@@ -28,6 +28,16 @@ import queue
 import datetime
 import time
 
+# graph plotting lib imports
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+from matplotlib.figure import Figure
+import matplotlib.animation as animation
+from matplotlib import style
+style.use("ggplot")
+import numpy as np
+
 
 
 # ============== GLOBAL PARAMS FOR THREAD-EVENT HANDLING ===============================
@@ -447,7 +457,6 @@ class ScanWindow(tk.Toplevel):
         self.attack_flows_label = tk.Label(self.attack_flows_frame, text="Attack Flows Detected", bg="gray", font=self.LARGE_FONT)
         self.attack_flows_label.pack()
         self.attack_flows_text = tk.scrolledtext.ScrolledText(self.attack_flows_frame, width=50, height=30)
-        self.attack_flows_text.insert(tk.INSERT, "Attack Flows Detected will go here")
         self.attack_flows_text.pack()
 
         # selected attacks frame
@@ -527,7 +536,6 @@ class ScanWindow(tk.Toplevel):
             self.dnn_thread.start()
             dnn_running = True
 
-
     # event handler for save log button
     def save_log_routine(self):
 
@@ -580,14 +588,14 @@ class ScanWindow(tk.Toplevel):
 
     # the thread for running the DNN daemon
     def dnn_routine(self):
-        global dnn_ready_event, engine_dnn_queue, dnn_gui_queue
-        self.dnn_engine = dnnengine.DNNEngine(MainWindow.selected_attacks, dnn_ready_event, engine_dnn_queue, dnn_gui_queue)
+        global dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event
+        self.dnn_engine = dnnengine.DNNEngine(MainWindow.selected_attacks, dnn_ready_event, engine_dnn_queue, dnn_gui_queue, gui_event)
         self.dnn_engine.run_dnn_engine()
 
     # the thread responsible for refreshing the GUI 
     def refresh_gui(self, master):
         global gui_queue
-        global gui_event, dnn_ready_event
+        global gui_event, dnn_ready_event, dnn_gui_queue
         # make the refresh_gui code independent of the current scan window object
         # since if the window is closed (object deleted) it leaves the thread
         # with a dangling 'self' pointer and raises an exception
@@ -595,16 +603,38 @@ class ScanWindow(tk.Toplevel):
         dnn_ready_event.wait()
         while True:    
             # wait for data to be ready to start printing
-            gui_event.wait()           
-            q_data = gui_queue.get()
-            master.scan_window.flow_data_box.insert(tk.END, "{} : {} [{}, {}, {}]\n".format(q_data[0], q_data[1], q_data[2], q_data[3], q_data[4]))
-            # master.scan_window.flow_data_box.insert(tk.END, q.get() + "\n")
-            master.scan_window.flow_data_box.see(tk.END)
-            master.scan_window.update()
+            gui_event.wait()        
+            # handle if event raised by feature-engine   
+            try:
+                print("[DEBUG-GUI] engine - in try")
+                # see if the event was raised by the feature-engine
+                q_data = gui_queue.get(block=False)
+            except queue.Empty:
+                print("[DEBUG-GUI] engine - in except")
+                pass
+            else:
+                print("[DEBUG-GUI] engine - in else")
+                master.scan_window.flow_data_box.insert(tk.END, "{} : {} [{}, {}, {}]\n".format(q_data[0], q_data[1], q_data[2], q_data[3], q_data[4]))
+                # master.scan_window.flow_data_box.insert(tk.END, q.get() + "\n")
+                master.scan_window.flow_data_box.see(tk.END)
+                master.scan_window.update()
 
-            # if the q is empty, block the refresh thread until there's data in q
+            # handle if event raised by dnn-engine
+            try:
+                print("[DEBUG-GUI] dnn - in try")
+                q_data = dnn_gui_queue.get(block=False)
+            except queue.Empty:
+                print("[DEBUG-GUI] dnn - in except")
+                pass
+            else:
+                print("[DEBUG-GUI] dnn - in else")
+                master.scan_window.attack_flows_text.insert(tk.END, "{} : {}\n".format(q_data[0], q_data[1]))
+                master.scan_window.attack_flows_text.see(tk.END)
+                master.scan_window.update()
+
+            # if the q's are empty, block the refresh thread until there's data in q's
             # to save processing time
-            if gui_queue.empty():
+            if gui_queue.empty() and dnn_gui_queue.empty():
                 gui_event.clear()
 
     # the code for the log-getter daemon, resonsible for logging flow data
@@ -658,7 +688,80 @@ class ScanWindow(tk.Toplevel):
 
     # the code for drawing a live graph
     def graph_routine(self):
-        pass
+
+        # some local event functions
+        def exit_button():
+            self.graph_window.destroy()
+
+        # the main graphing window to pop-up
+        self.graph_window = tk.Toplevel(master=self)
+        self.graph_window.title("RealTime DNN Statistics Graphs")
+
+        x = [1, 2, 3]
+        y = [0.1, 0.3, 0.5]
+
+        def tick_method(i):
+            nonlocal x, y, fig_prec_plot, fig_recall_plot
+            # to start/stop the graph animation along with the scan
+            global scan_event
+
+            # if the scan is not running, don't do anything!
+            if not scan_event.is_set():
+                return
+            # otherwise, just continue with the usual stuff!
+            else:
+                # add a random value to the array every second
+                if len(x) > 10:
+                    x.remove(x[0])
+                x.append(x[len(x) - 1] + 1)
+                if len(y) > 10:
+                    y.remove(y[0])
+                y.append(np.random.randint(1, 10)/10.0)
+                fig_prec_plot.clear()
+                fig_prec_plot.plot(x, y)
+                fig_prec_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Precision RealTime")
+                limits = fig_prec_plot.axis()
+                fig_prec_plot.axis([limits[0], limits[1], 0, 1])
+
+                fig_recall_plot.clear()
+                fig_recall_plot.plot(x, y)
+                fig_recall_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Recall RealTime")
+                limits=fig_recall_plot.axis()
+                fig_recall_plot.axis([limits[0], limits[1], 0, 1])
+
+        # the main graphing frame, for tkinter purposes
+        graph_frame = tk.Frame(self.graph_window)
+        graph_frame.pack(side="top")
+
+        # the big 'figure' object for matplotlib purposes
+        main_figure = Figure(figsize=(10, 5), dpi=100)
+
+        # the precision subplot on the main_figure
+        fig_prec_plot = main_figure.add_subplot(121)
+        fig_prec_plot.plot(x, y)
+        fig_prec_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Precision RealTime")
+        limits = fig_prec_plot.axis()
+        fig_prec_plot.axis([limits[0], limits[1], 0, 1])
+        # the recall subplot on the main_figure
+        fig_recall_plot = main_figure.add_subplot(122)
+        fig_recall_plot.plot(x, y)
+        fig_recall_plot.set(xlabel="time (s)", ylabel="Rand(int)", title="Recall RealTime")
+        limits = fig_recall_plot.axis()
+        fig_recall_plot.axis([limits[0], limits[1], 0, 1])
+
+        # draw stuff on the canvas to link tkinter and matplotlib figure
+        canvas = FigureCanvasTkAgg(main_figure, graph_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side="top", expand=True)
+        toolbar = NavigationToolbar2TkAgg(canvas, graph_frame)
+        toolbar.update()
+        canvas._tkcanvas.pack(side="bottom", fill="both", expand=True)
+        # make the graph come alive!
+        ani = animation.FuncAnimation(main_figure, tick_method, interval=1000)
+        
+        self.graph_exit_button = tk.Button(master=self.graph_window, text="Exit", command=exit_button)
+        self.graph_exit_button.pack(side="bottom")
+        self.graph_window.mainloop()
 
     # the code for displaying help
     def help_routine(self):
@@ -680,7 +783,6 @@ class ScanWindow(tk.Toplevel):
         gui_event.clear()
         # destroy the window
         super(ScanWindow, self).destroy()
-
 
 # generate the main gui window
 main_gui = MainWindow()

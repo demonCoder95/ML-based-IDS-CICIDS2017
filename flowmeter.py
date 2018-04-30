@@ -228,6 +228,7 @@ class FlowMeter():
                                 self.run_log_event.set()
                                 # send a dictionary of feature vector to the DNN with corresponding attacks
                                 self.engine_dnn_queue.put({"portscan":[
+                                    self.current_flow.get_flow_id(),
                                     self.flow_buffer[self.bwd_id].bwd_packets_per_second,
                                     self.flow_buffer[self.bwd_id].psh_flag_count,
                                     self.flow_buffer[self.bwd_id].init_win_bytes_forward
